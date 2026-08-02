@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>ESP32 Sensor Monitor</title>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-navy-900 text-white font-sans min-h-screen flex flex-col items-center justify-center p-4">
+
+    <!--Container -->
+    <div class="w-full max-w-7xl flex flex-col xl:flex-row gap-6">
+
+        <!-- KOTAK KIRI: Realtime Monitor (dari kode sebelumnya) -->
+        <div class="bg-navy-800 w-full xl:w-1/3 rounded-[2.5rem] shadow-2xl relative border border-white/10 p-8 flex flex-col min-h-[600px]">
+
+            <div class="text-left mt-2 mb-8">
+                <h1 class="text-xl font-semibold tracking-wide text-gray-300 uppercase">Weather Monitor</h1>
+                <p class="text-sm text-gray-400 mt-1">Real-time Data</p>
+            </div>
+
+            <div class="flex-grow flex items-center justify-center">
+                <div id="weather-icon-container" class="animate-float">
+                    <i data-lucide="cloud-sun" class="w-40 h-40 text-blue-200"></i>
+                </div>
+            </div>
+
+            <div class="text-center mt-8 mb-12">
+                <h2 id="temp" class="text-7xl font-bold tracking-tighter">--&deg;C</h2>
+            </div>
+
+            <div class="flex flex-col space-y-4 mt-auto border-l-4 border-blue-500 pl-4 py-1">
+                <div class="flex items-center space-x-3">
+                    <i data-lucide="droplets" class="w-5 h-5 text-blue-400"></i>
+                    <p class="text-lg font-light">Humidity: <span class="font-semibold ml-1" id="hum">--%</span></p>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <i data-lucide="wind" class="w-5 h-5 text-teal-400"></i>
+                    <p class="text-lg font-light">CO² = <span class="font-semibold ml-1" id="co2">-- PPM</span></p>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <i data-lucide="sun" class="w-5 h-5 text-yellow-300"></i>
+                    <p class="text-lg font-light">Light: <span class="font-semibold ml-1" id="light">-- lux</span></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- KOTAK KANAN: Prediksi & Riwayat Grafik -->
+        <div class="bg-navy-800 w-full xl:w-2/3 rounded-[2.5rem] shadow-2xl relative border border-white/10 p-8 flex flex-col h-[800px] xl:h-auto">
+
+            <!-- Top Section: Text Status & Prediksi -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 bg-navy-900/50 p-6 rounded-2xl border border-white/5">
+                <div>
+                    <h3 class="text-gray-400 text-sm font-medium uppercase tracking-wider mb-2">Cuaca Hari Ini</h3>
+                    <p id="current-weather-text" class="text-2xl font-semibold text-white">Menunggu data...</p>
+                </div>
+                <div class="md:border-l md:border-white/10 md:pl-6">
+                    <h3 class="text-gray-400 text-sm font-medium uppercase tracking-wider mb-2">Prediksi 1 Jam Kedepan</h3>
+                    <p id="predicted-weather-text" class="text-2xl font-semibold text-yellow-400">Menghitung tren...</p>
+                </div>
+            </div>
+
+            <!-- Bottom Section: Grafik -->
+            <div class="flex-grow flex flex-col">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-gray-300 font-semibold tracking-wide">Riwayat Monitoring (Per 30 Menit)</h3>
+                    <span class="text-xs bg-blue-500/20 text-blue-300 px-3 py-1 rounded-full border border-blue-500/30" id="last-update-time">Update Terakhir: --:--</span>
+                </div>
+
+                <!-- Area Scrollable untuk Grafik -->
+                <div class="flex-grow overflow-y-auto space-y-6 pr-2">
+                    <div class="bg-navy-900/40 p-4 rounded-xl border border-white/5 relative h-48">
+                        <canvas id="chartTemp"></canvas>
+                    </div>
+                    <div class="bg-navy-900/40 p-4 rounded-xl border border-white/5 relative h-48">
+                        <canvas id="chartHum"></canvas>
+                    </div>
+                    <div class="bg-navy-900/40 p-4 rounded-xl border border-white/5 relative h-48">
+                        <canvas id="chartCO2"></canvas>
+                    </div>
+                    <div class="bg-navy-900/40 p-4 rounded-xl border border-white/5 relative h-48">
+                        <canvas id="chartLight"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+    <script>
+        lucide.createIcons();
+        let historyLabels = [];
+        let historyTemp = [];
+        let historyHum = [];
+        let historyCO2 = [];
+        let historyLight = [];
+
+        // --- KONFIGURASI GLOBAL CHART.JS ---
+        Chart.defaults.color = '#9ca3af'; // Text gray-400
+        Chart.defaults.font.family = 'Poppins';
+
+        const commonOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { grid: { color: '#ffffff10' } },
+                y: { grid: { color: '#ffffff10' }, beginAtZero: false }
+            },
+            elements: {
+                line: { tension: 0.4, borderWidth: 2 },
+                point: { radius: 4, hoverRadius: 6 }
+            }
+        };
+
+        // --- INISIALISASI 4 GRAFIK ---
+        const ctxTemp = document.getElementById('chartTemp').getContext('2d');
+        const chartTemp = new Chart(ctxTemp, {
+            type: 'line',
+            data: { labels: historyLabels, datasets: [{ data: historyTemp, borderColor: '#ef4444', backgroundColor: '#ef444450' }] },
+            options: { ...commonOptions, plugins: { title: { display: true, text: 'Suhu (°C)', color: '#fff', align: 'start' } } }
+        });
+
+        const ctxHum = document.getElementById('chartHum').getContext('2d');
+        const chartHum = new Chart(ctxHum, {
+            type: 'line',
+            data: { labels: historyLabels, datasets: [{ data: historyHum, borderColor: '#3b82f6', backgroundColor: '#3b82f650' }] },
+            options: { ...commonOptions, plugins: { title: { display: true, text: 'Humidity (%)', color: '#fff', align: 'start' } } }
+        });
+
+        const ctxCO2 = document.getElementById('chartCO2').getContext('2d');
+        const chartCO2 = new Chart(ctxCO2, {
+            type: 'line',
+            data: { labels: historyLabels, datasets: [{ data: historyCO2, borderColor: '#10b981', backgroundColor: '#10b98150' }] },
+            options: { ...commonOptions, plugins: { title: { display: true, text: 'CO2 (PPM)', color: '#fff', align: 'start' } } }
+        });
+
+        const ctxLight = document.getElementById('chartLight').getContext('2d');
+        const chartLight = new Chart(ctxLight, {
+            type: 'line',
+            data: { labels: historyLabels, datasets: [{ data: historyLight, borderColor: '#facc15', backgroundColor: '#facc1550' }] },
+            options: { ...commonOptions, plugins: { title: { display: true, text: 'Light (Lux)', color: '#fff', align: 'start' } } }
+        });
+
+        // --- FUNGSI UPDATE PREDIKSI CUACA ---
+        function updatePrediction() {
+            if (historyLabels.length < 3) return;
+
+            const n = historyTemp.length;
+            // Suhu
+            const currentTemp = historyTemp[n - 1];
+            const prevTemp = historyTemp[n - 2];
+            const prev2Temp = historyTemp[n - 3];
+
+            // Kelembaban
+            const currentHum = historyHum[n - 1];
+            const prevHum = historyHum[n - 2];
+            const prev2Hum = historyHum[n - 3];
+
+            // Intensitas Cahaya
+            const currentLight = historyLight[n - 1];
+            const prevLight = historyLight[n - 2];
+            const prev2Light = historyLight[n - 3];
+
+            let prediksi = "Cuaca Stabil";
+            let colorClass = "text-2xl font-semibold text-green-400";
+
+            if (currentHum >= 75 && currentLight <= 200){
+                //kondisi berpotensi gerimis
+                prediksi = "Berpotensi Gerimis";
+                colorClass = "text-2xl font-semibold text-blue-300"
+            } else if ((prev2Light > prevLight) && (prevLight > currentLight) && (currentHum > prevHum) && (prevHum > prev2Hum)){
+                //kondisi berpotensi berawan mendung
+                prediksi = "Berawan / Mendung";
+                colorClass = "text-2xl font-semibold text-blue-400"
+            } else if ( (currentLight > prevLight) && (prevLight > prev2Light) && (currentTemp > prevTemp) && (prevTemp > prev2Temp)){
+                //kondisi cerah panas
+                prediksi = "Cerah & Suhu Meningkat";
+                colorClass = "text-2xl font-semibold text-yellow-400";
+            } else {
+                //kondisi stabil
+                prediksi = "Cuaca Stabil";
+                colorClass = "text-2xl font-semibold text-green-400";
+            }
+            document.getElementById("predicted-weather-text").innerText = prediksi;
+            document.getElementById("predicted-weather-text").className = colorClass;
+        }
+
+        // --- FUNGSI FETCH REALTIME (Setiap 2 Detik) ---
+        async function fetchData() {
+            try {
+                const res = await fetch('/data');
+                const data = await res.json();
+                historyLabels = data["label-history"];
+                historyTemp = data["temp-history"];
+                historyHum = data["humid-history"];
+                historyCO2 = data["co2-history"];
+                historyLight = data["light-history"];
+                // Update UI Realtime
+                document.getElementById("temp").innerText = data.temperature + " °C";
+                document.getElementById("hum").innerText = data.humidity + " %";
+                document.getElementById("co2").innerText = data.co2 + " ppm";
+                document.getElementById("light").innerText = data.light + " lux";
+                // Update Grafik
+                chartTemp.data.labels = historyLabels;
+                chartTemp.data.datasets[0].data = historyTemp;
+                chartTemp.update();
+
+                chartHum.data.labels = historyLabels;
+                chartHum.data.datasets[0].data = historyHum;
+                chartHum.update();
+
+                chartCO2.data.labels = historyLabels;
+                chartCO2.data.datasets[0].data = historyCO2;
+                chartCO2.update();
+
+                chartLight.data.labels = historyLabels;
+                chartLight.data.datasets[0].data = historyLight;
+                chartLight.update();
+
+                if (historyLabels.length > 0) {
+                    document.getElementById("last-update-time").innerText =
+                        "Update Terakhir: " + historyLabels[historyLabels.length - 1];
+                    updatePrediction();
+                }
+
+                const lux = data.light;
+                let iconName = '';
+                let colorClass = '';
+                let statusText = '';
+
+                if (lux > 6000){
+                    iconName = 'sun';
+                    colorClass = 'text-yellow-400';
+                    statusText = 'Sangat Cerah';
+                } else if(lux > 1000){
+                    iconName = 'cloud-sun';
+                    colorClass = 'text-blue-200';
+                    statusText = 'Cerah Berawan';
+                } else if(lux > 200){
+                    iconName = 'cloud';
+                    colorClass = 'text-gray-300';
+                    statusText = 'Mendung';
+                } else {
+                    iconName = 'cloud';
+                    colorClass = 'text-slate-600';
+                    statusText = 'Gelap';
+                }
+
+                // Update Icon
+                const iconContainer = document.getElementById('weather-icon-container');
+                iconContainer.innerHTML = `<i data-lucide="${iconName}" class="w-40 h-40 ${colorClass}"></i>`;
+                lucide.createIcons();
+
+                // Update Teks Cuaca Hari Ini
+                const weatherTextEl = document.getElementById('current-weather-text');
+                weatherTextEl.innerText = statusText;
+                weatherTextEl.className = `text-2xl font-semibold ${colorClass}`;
+
+            } catch (err) {
+                console.log("Menunggu koneksi ke ESP32...", err);
+            }
+        }
+
+        // Panggilan Awal
+        fetchData();
+        // Interval: Real-time update setiap 2 detik
+        setInterval(fetchData, 2000);
+
+    </script>
+</body>
+</html>
